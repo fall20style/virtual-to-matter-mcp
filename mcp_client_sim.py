@@ -2,7 +2,8 @@ import asyncio
 import re
 from mcp.client import Client
 
-MCP_SERVER_URL = "http://127.0.0.1:8000/mcp"
+#MCP_SERVER_URL = "http://127.0.0.1:8000/mcp"
+MCP_SERVER_URL = "http://127.0.0.1:8100/mcp"
 
 
 def extract_task_id(text: str) -> str:
