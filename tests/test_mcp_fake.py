@@ -1,9 +1,9 @@
-import asyncio
+﻿import asyncio
 import re
 import pytest
 
-import mcp_tools
-from fake_home_service import FakeHomeService
+from interfaces import mcp_tools
+from services.fake_service import FakeHomeService
 
 
 # 각 테스트마다 깨끗한 상태의 FakeHomeService 객체를 mcp_tools에 주입하는 픽스처
@@ -104,3 +104,4 @@ async def test_tc06_invalid_task_id():
     status = await mcp_tools.get_task_result(task_id="00000000")
     assert "NOT_FOUND" in status
     assert "존재하지 않는 작업 ID입니다." in status
+

@@ -1,7 +1,7 @@
-import asyncio
+﻿import asyncio
 import uuid
 from typing import Optional
-from home_port import HomeControllerPort
+from core.ports import HomeControllerPort
 
 
 class FakeHomeService(HomeControllerPort):
@@ -66,3 +66,4 @@ class FakeHomeService(HomeControllerPort):
 
         self.fake_tasks[task_id]["status"] = "COMPLETED"
         self.fake_tasks[task_id]["result"] = f"[Simulated] {device_id} -> {action} 완료 (현재 상태: {device})"
+
