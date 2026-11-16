@@ -6,25 +6,29 @@ from fastapi import FastAPI
 from interfaces import mcp_tools
 from services.real_service import RealHomeService
 
-# 환경 변수(RUN_MODE=actual 또는 virtual)에 따라 실행 모드 결정
 RUN_MODE = os.getenv("RUN_MODE", "virtual")
 real_service = RealHomeService(mode=RUN_MODE)
 mcp_tools.home_service = real_service
 
+# MCP Streamable HTTP 서브 앱 생성 (경로: /mcp)
+mcp_http_app = mcp_tools.mcp.streamable_http_app(streamable_http_path="/")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 서버 시작 시 워커 풀 가동
+    # 1. 백그라운드 워커 풀(3개 워커) 시작
     real_service.start()
-    yield
-    # 서버 종료 시 워커 풀 정리
+    # 2. MCP v2 세션 매니저 시작
+    async with mcp_tools.mcp.session_manager.run():
+        yield
+    # 3. 서버 종료 시 워커 풀 정리
     real_service.stop()
 
 
 app = FastAPI(title="Virtual-to-Matter MCP Home Controller", lifespan=lifespan)
 
-# MCP v2 Streamable HTTP 앱 마운트 (/mcp 경로로 AI 에이전트 접속 가능)
-app.mount("/mcp", mcp_tools.mcp.streamable_http_app())
+# /mcp 경로로 외부 MCP 클라이언트 접속 허용
+app.mount("/mcp", mcp_http_app)
 
 
 @app.get("/health")
