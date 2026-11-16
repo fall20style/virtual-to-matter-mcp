@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual-to-Matter MCP Smart Home GUI</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #38bdf8;
+            --on-glow: #facc15;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            background-color: #0284c7;
+            color: white;
+            margin-top: 0.5rem;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 1050px;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            border: 1px solid #334155;
+            transition: all 0.3s ease;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .proto-tag {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 6px;
+            background: #334155;
+            color: var(--accent);
+            text-transform: uppercase;
+        }
+        /* 가상 전등 시각화 */
+        .bulb-visual {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin: 1rem auto;
+            background-color: #334155;
+            transition: all 0.4s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #0f172a;
+        }
+        /* 가상 TV 화면 시각화 */
+        .tv-screen {
+            width: 100%;
+            height: 90px;
+            border-radius: 8px;
+            margin: 1rem 0;
+            background-color: #020617;
+            border: 3px solid #475569;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        .tv-on {
+            background: linear-gradient(135deg, #1d4ed8, #0ea5e9);
+            border-color: #38bdf8;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+        }
+        /* 센서 수치 시각화 */
+        .sensor-values {
+            display: flex;
+            justify-content: space-around;
+            margin: 1.2rem 0;
+            font-size: 1.4rem;
+            font-weight: bold;
+        }
+        .controls {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+        button {
+            flex: 1;
+            padding: 0.6rem;
+            border: none;
+            border-radius: 8px;
+            background-color: #334155;
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #475569; }
+        button.primary { background-color: #0284c7; }
+        button.primary:hover { background-color: #0369a1; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🏠 Virtual-to-Matter MCP Smart Home</h1>
+        <div id="mode-badge" class="badge">MODE: LOADING...</div>
+    </header>
+
+    <div class="grid">
+        <!-- 1. 거실 전등 카드 -->
+        <div class="card">
+            <div class="card-header">
+                <h3>💡 거실 전등 (light_living)</h3>
+                <span id="light-proto" class="proto-tag">MATTER</span>
+            </div>
+            <div id="bulb" class="bulb-visual">OFF</div>
+            <p style="text-align:center; color: var(--text-muted);">
+                밝기: <strong id="light-brightness">0</strong>%
+            </p>
+            <div class="controls">
+                <button class="primary" onclick="sendCmd('light_living', 'turn_on', 100)">켜기 (100%)</button>
+                <button onclick="sendCmd('light_living', 'set_brightness', 40)">무드등 (40%)</button>
+                <button onclick="sendCmd('light_living', 'turn_off', null)">끄기</button>
+            </div>
+        </div>
+
+        <!-- 2. 거실 스마트 TV 카드 -->
+        <div class="card">
+            <div class="card-header">
+                <h3>📺 거실 스마트 TV (tv_main)</h3>
+                <span id="tv-proto" class="proto-tag">IOTIVITY</span>
+            </div>
+            <div id="tv-screen" class="tv-screen">
+                <span id="tv-status">전원 꺼짐 (OFF)</span>
+            </div>
+            <div class="controls">
+                <button class="primary" onclick="sendCmd('tv_main', 'turn_on', null)">TV 켜기</button>
+                <button onclick="sendCmd('tv_main', 'set_channel', 7)">CH 7</button>
+                <button onclick="sendCmd('tv_main', 'set_channel', 11)">CH 11</button>
+                <button onclick="sendCmd('tv_main', 'turn_off', null)">끄기</button>
+            </div>
+        </div>
+
+        <!-- 3. 거실 온습도 센서 카드 -->
+        <div class="card">
+            <div class="card-header">
+                <h3>🌡️ 온습도 센서 (sensor_env)</h3>
+                <span id="sensor-proto" class="proto-tag">MATTER</span>
+            </div>
+            <div class="sensor-values">
+                <div>🌡️ <span id="sensor-temp">--</span>°C</div>
+                <div>💧 <span id="sensor-hum">--</span>%</div>
+            </div>
+            <div class="controls">
+                <button class="primary" onclick="sendCmd('sensor_env', 'read', null)">지금 센서 측정 (Read)</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 서버 상태를 주기적(1초)으로 가져와 GUI에 실시간 반영 (MCP 에이전트 제어 결과도 즉시 반영됨)
+        async function fetchStates() {
+            try {
+                const res = await fetch('/health');
+                const data = await res.json();
+                document.getElementById('mode-badge').innerText = `MODE: ${data.mode.toUpperCase()}`;
+
+                const d = data.devices;
+
+                // 전등 UI 업데이트
+                const light = d.light_living;
+                const bulb = document.getElementById('bulb');
+                document.getElementById('light-proto').innerText = light.protocol;
+                document.getElementById('light-brightness').innerText = light.brightness;
+                if (light.power === 'ON') {
+                    const intensity = Math.max(0.3, light.brightness / 100);
+                    bulb.style.backgroundColor = `rgba(250, 204, 21, ${intensity})`;
+                    bulb.style.boxShadow = `0 0 ${light.brightness / 2}px rgba(250, 204, 21, 0.8)`;
+                    bulb.innerText = 'ON';
+                } else {
+                    bulb.style.backgroundColor = '#334155';
+                    bulb.style.boxShadow = 'none';
+                    bulb.innerText = 'OFF';
+                }
+
+                // TV UI 업데이트
+                const tv = d.tv_main;
+                const tvScreen = document.getElementById('tv-screen');
+                document.getElementById('tv-proto').innerText = tv.protocol;
+                if (tv.power === 'ON') {
+                    tvScreen.classList.add('tv-on');
+                    document.getElementById('tv-status').innerText = `ON AIR — CH ${tv.channel}`;
+                } else {
+                    tvScreen.classList.remove('tv-on');
+                    document.getElementById('tv-status').innerText = '전원 꺼짐 (OFF)';
+                }
+
+                // 센서 UI 업데이트
+                const sensor = d.sensor_env;
+                document.getElementById('sensor-proto').innerText = sensor.protocol;
+                document.getElementById('sensor-temp').innerText = sensor.temperature;
+                document.getElementById('sensor-hum').innerText = sensor.humidity;
+
+            } catch (e) {
+                console.error('상태 조회 실패:', e);
+            }
+        }
+
+        // 2. 웹 화면 버튼 클릭 시 백그라운드 워커 큐로 제어 명령 전송
+        async function sendCmd(deviceId, action, value) {
+            const params = new URLSearchParams({ device_id: deviceId, action: action });
+            if (value !== null) params.append('value', value);
+            await fetch(`/api/control?${params.toString()}`, { method: 'POST' });
+        }
+
+        setInterval(fetchStates, 1000);
+        fetchStates();
+    </script>
+</body>
+</html>

@@ -1,7 +1,9 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from interfaces import mcp_tools
 from services.real_service import RealHomeService
@@ -10,25 +12,33 @@ RUN_MODE = os.getenv("RUN_MODE", "virtual")
 real_service = RealHomeService(mode=RUN_MODE)
 mcp_tools.home_service = real_service
 
-# MCP Streamable HTTP 서브 앱 생성 (경로: /mcp)
 mcp_http_app = mcp_tools.mcp.streamable_http_app(streamable_http_path="/")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. 백그라운드 워커 풀(3개 워커) 시작
     real_service.start()
-    # 2. MCP v2 세션 매니저 시작
     async with mcp_tools.mcp.session_manager.run():
         yield
-    # 3. 서버 종료 시 워커 풀 정리
     real_service.stop()
 
 
 app = FastAPI(title="Virtual-to-Matter MCP Home Controller", lifespan=lifespan)
-
-# /mcp 경로로 외부 MCP 클라이언트 접속 허용
 app.mount("/mcp", mcp_http_app)
+
+
+# 웹 GUI 대시보드 화면 제공
+@app.get("/gui", response_class=HTMLResponse)
+async def serve_dashboard():
+    html_path = Path(__file__).parent / "templates" / "dashboard.html"
+    return html_path.read_text(encoding="utf-8")
+
+
+# 웹 GUI 버튼 클릭 시 백그라운드 워커 큐에 명령 등록
+@app.post("/api/control")
+async def gui_control_device(device_id: str, action: str, value: int | None = None):
+    task_id = await real_service.execute_now(device_id, action, value)
+    return {"status": "queued", "task_id": task_id}
 
 
 @app.get("/health")
@@ -41,4 +51,4 @@ async def health_check():
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8100, reload=True)
