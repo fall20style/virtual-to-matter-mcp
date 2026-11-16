@@ -2,16 +2,16 @@
 
 AI 에이전트(Discord, Meta Muse, Claude 등)가 **MCP(Model Context Protocol v2)**를 통해 음성 또는 텍스트로 스마트홈 기기(전등, TV, 센서)를 제어하고 스케줄링할 수 있도록 설계된 **비동기 홈 컨트롤러 서버**입니다.
 
-포트와 어댑터(Hexagonal) 아키텍처를 적용하여, **가상 시뮬레이션(`FakeHomeService`)** 환경에서 완벽하게 테스트한 뒤 코드 수정 없이 **실제 하드웨어 프로토콜(`Matter` / `IoTivity`)** 구현체로 즉시 전환할 수 있습니다.
+포트와 어댑터(Hexagonal) 아키텍처를 적용하여, **가상 시뮬레이션(`FakeHomeService` / Virtual 모드)** 환경에서 완벽하게 테스트한 뒤 코드 수정 없이 **실제 하드웨어 프로토콜(`Matter` / `IoTivity`)** 구현체로 즉시 전환할 수 있습니다.
 
 ---
 
 ## 주요 기능
 
-- **MCP v2 (`MCPServer`) 표준 인터페이스 제공**: LLM 에이전트가 즉시 호출할 수 있는 4종의 표준 도구(`get_home_devices`, `control_device`, `schedule_device`, `get_task_result`)를 제공합니다.
-- **시뮬레이션과 실기기의 완벽한 분리 (`HomeControllerPort`)**: 추상 인터페이스를 통해 가상 전등·TV·센서 시뮬레이터와 실제 Matter/IoTivity 제어 모듈을 손쉽게 교체할 수 있습니다.
-- **비동기 지연 스케줄링**: *"N분 뒤에 거실 불 꺼줘"*와 같은 예약 명령을 이벤트 루프 블로킹 없이 백그라운드에서 정확히 실행합니다.
-- **의존성 주입(DI) 기반 자동화 테스트**: 실제 하드웨어 장비 없이도 `pytest`를 통해 모든 기기 제어 및 스케줄링 시나리오를 수 초 내에 자동 검증합니다.
+- **MCP v2 (`MCPServer`) 표준 인터페이스 제공**: LLM 에이전트가 즉시 호출할 수 있는 4종의 표준 도구(`get_home_devices`, `control_device`, `schedule_device`, `get_task_result`)를 `/mcp` 경로로 제공합니다.
+- **이벤트 드리븐 비동기 워커 풀 (`services/worker_pool.py`)**: 폴링(Polling) 없이 `asyncio.Queue`에서 대기하는 3개의 백그라운드 워커가 동시 요청을 안전하게 분산 처리합니다.
+- **프로토콜 라우팅 (`RealHomeService`)**: 기기별로 지정된 프로토콜(`Matter` 또는 `IoTivity`)에 따라 제어 명령을 자동 분기하며, `RUN_MODE` 환경 변수(`virtual` / `actual`)로 실행 모드를 전환합니다.
+- **의존성 주입(DI) 기반 자동화 테스트 (`tests/`)**: `FakeHomeService` 단위 검증(6개)과 `RealHomeService` 워커 풀·프로토콜 검증(3개) 등 총 9개의 통합 테스트 스위트를 지원합니다.
 
 ---
 
@@ -28,14 +28,24 @@ py -3.12 -m venv .venv
 pip install mcp fastapi uvicorn pytest pytest-asyncio httpx
 ```
 
-### 3. 자동화 테스트 실행 (`pytest`)
+### 3. 통합 서버 실행 (`main.py`)
 ```powershell
-pytest test_mcp_home.py -v
+# Virtual(시뮬레이션) 모드로 실행 (기본값)
+python main.py
+
+# Actual(실제 Matter/IoTivity 제어) 모드로 실행
+$env:RUN_MODE="actual"; python main.py
+```
+서버가 시작되면 `http://127.0.0`에서 상태를 확인할 수 있으며, AI 에이전트는 `http://127.0.0`로 MCP 연결을 맺을 수 있습니다.
+
+### 4. 자동화 테스트 실행 (`pytest`)
+```powershell
+pytest -v
 ```
 
 ---
 
-## 제공되는 MCP Tools (`mcp_tools.py`)
+## 제공되는 MCP Tools (`interfaces/mcp_tools.py`)
 
 | Tool 이름 | 설명 | 주요 파라미터 |
 | :--- | :--- | :--- |
@@ -46,17 +56,38 @@ pytest test_mcp_home.py -v
 
 ---
 
-## 프로젝트 구조
+## 프로젝트 패키지 구조
 
 ```text
 virtual-to-matter-mcp/
-├── .venv/                   # Python 3.12 가상환경
-├── home_port.py             # 스마트홈 제어 서비스 추상 인터페이스 (Port)
-├── fake_home_service.py     # 개발 및 테스트용 가상 기기 시뮬레이션 구현체 (Adapter)
-├── mcp_tools.py             # MCP v2(MCPServer) 기반 LLM 에이전트 연동 인터페이스
-├── test_mcp_home.py         # pytest 기반 MCP 기능 통합 자동화 테스트
-├── pytest.ini               # pytest 비동기 이벤트 루프 설정
-├── README.md                # 프로젝트 개요 및 설치·테스트 가이드
-├── ARCHITECTURE.md          # 포트와 어댑터 아키텍처 및 Mermaid 다이어그램
-└── TEST_CASE.md             # MCP Tool 통합 테스트 케이스 명세서
+├── .venv/                       # Python 3.12 가상환경 (Git 제외)
+├── .gitignore                   # Git 추적 제외 설정
+├── pytest.ini                   # pytest 비동기 설정 및 pythonpath 지정
+├── main.py                      # [Entrypoint] FastAPI + MCPServer 통합 실행 진입점
+│
+├── core/                        # [1. 핵심 도메인 & 추상 포트]
+│   ├── __init__.py
+│   └── ports.py                 # HomeControllerPort 추상 인터페이스 (ABC)
+│
+├── services/                    # [2. 비즈니스 로직 & 어댑터 구현체]
+│   ├── __init__.py
+│   ├── worker_pool.py           # 이벤트 기반 비동기 큐(asyncio.Queue) & 워커 풀 엔진
+│   ├── fake_service.py          # 단위 테스트용 가짜 시뮬레이션 구현체
+│   ├── real_service.py          # 워커 풀 + Matter/IoTivity 프로토콜 라우터 구현체
+│   └── protocols/               # 실제 하드웨어 프로토콜별 어댑터 확장 영역
+│       └── __init__.py
+│
+├── interfaces/                  # [3. 외부 통신 접점 (Driving Adapters)]
+│   ├── __init__.py
+│   └── mcp_tools.py             # MCP v2(MCPServer) 기반 LLM 에이전트 연동 인터페이스
+│
+├── templates/                   # 웹 GUI 템플릿 확장 영역
+├── tests/                       # [4. 자동화 테스트 스위트]
+│   ├── __init__.py
+│   ├── test_mcp_fake.py         # FakeHomeService 기반 MCP 단위 테스트 (6개)
+│   └── test_real_worker.py      # RealHomeService + 워커 풀 동시성·프로토콜 테스트 (3개)
+│
+├── README.md                    # 프로젝트 개요 및 설치·실행 가이드
+├── ARCHITECTURE.md              # 포트와 어댑터 아키텍처 및 Mermaid 다이어그램
+└── TEST_CASE.md                 # 통합 테스트 케이스 명세서
 ```

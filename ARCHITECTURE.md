@@ -1,87 +1,110 @@
 # System Architecture — virtual-to-matter-mcp
 
-본 문서는 **`virtual-to-matter-mcp`**의 **포트와 어댑터(Hexagonal) 아키텍처** 및 **시뮬레이션(Virtual)에서 실제 IoT 프로토콜(Matter / IoTivity)로 확장 가능한 소프트웨어 구조**를 정의합니다.
+본 문서는 **`virtual-to-matter-mcp`**의 **포트와 어댑터(Hexagonal) 패키지 아키텍처** 및 **이벤트 드리븐 비동기 워커 풀 기반 스마트홈 제어 흐름**을 정의합니다.
 
 ---
 
 ## 1. 핵심 설계 원칙
 
-- **의존성 역전 원칙 (DIP)**: 외부 접점인 `mcp_tools.py`는 구체적인 기기 제어 방식(가상 시뮬레이션 또는 실제 하드웨어 통신)을 전혀 알지 못하며, 오직 추상 인터페이스인 `HomeControllerPort`에만 의존합니다.
-- **무수정 확장성 (Open-Closed Principle)**: 추후 실제 Matter나 IoTivity 프로토콜을 연동할 때 `HomeControllerPort`를 상속받은 `RealHomeService` 클래스만 새로 구현하여 주입하면, MCP Tool 정의나 에이전트 연동 코드는 단 한 줄도 수정할 필요가 없습니다.
-- **테스트 용이성 (Testability)**: `pytest` 실행 시마다 초기화된 `FakeHomeService` 인스턴스를 주입하여 하드웨어 장비 없이도 기기 상태 전이와 지연 스케줄링을 결정론적으로 검증합니다.
+- **계층화된 패키지 분리 (`core` / `services` / `interfaces`)**:
+  - `core/`: 외부 프레임워크나 프로토콜에 전혀 의존하지 않는 순수 인터페이스(`HomeControllerPort`)를 정의합니다.
+  - `services/`: 실제 작업을 수행하는 비동기 워커 풀(`worker_pool.py`), 테스트용 `FakeHomeService`, 프로토콜 라우팅을 담당하는 `RealHomeService`가 위치합니다.
+  - `interfaces/`: AI 에이전트와 통신하는 `MCPServer` 도구(`mcp_tools.py`)를 담당합니다.
+- **무폴링 이벤트 드리븐 워커 풀 (`Zero-Polling Worker Pool`)**:
+  - `asyncio.Queue`와 `asyncio.Event`를 활용하여 주기적인 폴링 없이 작업 수신 및 완료 알림을 비동기적으로 처리합니다.
+  - `WORKER_POOL_SIZE = 3`으로 동시 실행 개수를 제한하여 다중 에이전트 요청 폭주 시에도 시스템 안정성을 보장합니다.
+- **무수정 프로토콜 확장성**: `RealHomeService` 내부의 프로토콜 분기(`Matter` vs `IoTivity`)를 실제 SDK 클라이언트로 교체하더라도 `interfaces/mcp_tools.py`나 `main.py`는 수정할 필요가 없습니다.
 
 ---
 
 ## 2. 아키텍처 다이어그램
 
-### ① 컴포넌트 및 의존성 구조 (Ports & Adapters)
+### ① 패키지 및 컴포넌트 의존성 구조
 
 ```mermaid
 flowchart TB
-    subgraph Agents ["1. AI 에이전트 계층 (MCP Hosts)"]
-        Discord["Discord Bot<br/>(음성 / 채팅)"]
-        Muse["Meta Muse / LLM Agent<br/>(자연어 추론)"]
+    subgraph Entry ["Entrypoint (main.py)"]
+        FastAPI["FastAPI Lifespan & HTTP Server"]
     end
 
-    subgraph Interface ["2. MCP 인터페이스 계층 (Driving Adapter)"]
-        MCP["MCPServer<br/>(mcp_tools.py)"]
+    subgraph Agents ["AI 에이전트 계층 (MCP Hosts)"]
+        Discord["Discord Bot (음성 / 채팅)"]
+        Muse["Meta Muse / LLM Agent"]
     end
 
-    subgraph Core ["3. 추상 포트 계층 (Application Port)"]
-        Port["<<Interface>><br/>HomeControllerPort<br/>(home_port.py)"]
+    subgraph Driving ["interfaces/ (Driving Adapter)"]
+        MCP["MCPServer (/mcp)<br/>(interfaces/mcp_tools.py)"]
     end
 
-    subgraph Adapters ["4. 서비스 구현체 계층 (Driven Adapters)"]
-        Fake["FakeHomeService<br/>(fake_home_service.py)<br/>가상 전등 / TV / 센서 시뮬레이터"]
-        Real["RealHomeService (확장 예정)<br/>실제 하드웨어 프로토콜 라우터"]
+    subgraph Core ["core/ (Application Port)"]
+        Port["<<Interface>><br/>HomeControllerPort<br/>(core/ports.py)"]
+    end
+
+    subgraph Driven ["services/ (Driven Adapters & Async Engine)"]
+        Fake["FakeHomeService<br/>(services/fake_service.py)"]
+        Real["RealHomeService<br/>(services/real_service.py)"]
+        Pool[["Worker Pool & Queue<br/>(services/worker_pool.py)"]]
         
-        Matter["Matter Client<br/>(python-matter-server)"]
-        IoTivity["IoTivity Client<br/>(OCF CoAP)"]
+        Matter["Matter Protocol<br/>(전등 / 온습도 센서)"]
+        IoTivity["IoTivity OCF Protocol<br/>(스마트 TV)"]
         
-        Real --> Matter
-        Real --> IoTivity
+        Real --> Pool
+        Pool --> Matter
+        Pool --> IoTivity
     end
 
-    Discord & Muse -- "MCP Protocol (JSON-RPC)" --> MCP
+    FastAPI --> MCP
+    Discord & Muse -- "MCP Streamable HTTP" --> MCP
     MCP --> Port
-    Port -. "현재 주입 (개발/테스트)" .-> Fake
-    Port -. "향후 교체 (운영 환경)" .-> Real
+    Port -. "단위 테스트 주입" .-> Fake
+    Port -. "운영 및 통합 실행" .-> Real
 ```
 
-### ② 지연 스케줄링 및 제어 처리 흐름 (Sequence Diagram)
+### ② `RealHomeService` + 워커 풀 실행 시퀀스 다이어그램
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Agent as AI Agent (LLM)
-    participant MCP as mcp_tools.py (MCPServer)
-    participant Service as FakeHomeService (Port 구현체)
-    participant Timer as Async Background Task
-    participant Device as Virtual Devices (전등/TV/센서)
+    participant MCP as interfaces/mcp_tools.py
+    participant Real as services/real_service.py
+    participant Queue as services/worker_pool.py
+    participant Worker as Worker-1~3 (Pool)
+    participant Proto as Matter / IoTivity / Virtual
 
-    Agent->>MCP: schedule_device("light_living", "turn_off", delay_seconds=2)
-    MCP->>Service: schedule_later("light_living", "turn_off", 2)
-    Service->>Timer: create_task(_simulate_execution)
-    Service-->>MCP: task_id ("4d7f2e9f") 반환
-    MCP-->>Agent: "2초 뒤에 실행되도록 예약되었습니다. (작업 ID: 4d7f2e9f)"
+    Note over Real, Worker: main.py lifespan 시작 시 Worker-1~3 가동
+    Agent->>MCP: control_device("light_living", "set_brightness", value=75)
+    MCP->>Real: execute_now("light_living", "set_brightness", 75)
+    Real->>Queue: enqueue_device_task(task_id, payload)
+    Queue-->>Real: task_id 즉시 반환 (Non-blocking)
+    Real-->>MCP: task_id
+    MCP-->>Agent: "즉시 실행하도록 등록했습니다. (작업 ID: ...)"
 
-    Note over Timer, Device: 2초 지연 대기 후 비동기 실행 시작
-    Timer->>Device: light_living["power"] = "OFF"
-    Timer->>Service: fake_tasks[task_id]["status"] = "COMPLETED"
+    Queue-->>Worker: 큐 삽입 이벤트 수신 (유휴 워커 깨어남)
+    activate Worker
+    Worker->>Real: _dispatch_to_protocol("light_living", "set_brightness", 75)
+    Real->>Proto: protocol == "matter" 분기 실행 및 상태 갱신
+    Proto-->>Real: "[Matter ACK -> matter://node-01] 완료"
+    Real-->>Worker: 실행 결과 반환
+    Worker->>Queue: status="COMPLETED", event.set()
+    deactivate Worker
 
-    Agent->>MCP: get_task_result("4d7f2e9f")
-    MCP->>Service: get_task_status("4d7f2e9f")
-    Service-->>MCP: status="COMPLETED", result="... turn_off 완료"
-    MCP-->>Agent: 최종 완료 결과 전달
+    Agent->>MCP: get_task_result(task_id)
+    MCP->>Real: get_task_status(task_id)
+    Real-->>MCP: status="COMPLETED", worker="Worker-1", result="..."
+    MCP-->>Agent: 최종 실행 결과 응답
 ```
 
 ---
 
 ## 3. 모듈별 상세 역할
 
-| 파일명 | 계층 | 주요 역할 |
+| 패키지 / 파일 | 계층 | 주요 역할 |
 | :--- | :--- | :--- |
-| **`mcp_tools.py`** | Driving Adapter | `MCPServer` 인스턴스 생성 및 LLM 에이전트용 Tool 스키마(`Literal`, `Field`) 노출 |
-| **`home_port.py`** | Port (Interface) | 기기 조회, 즉시 제어, 지연 예약, 상태 조회 메서드를 강제하는 추상 기본 클래스(`ABC`) |
-| **`fake_home_service.py`** | Driven Adapter | 실제 하드웨어 없이 가상 전등·TV·센서의 메모리 상태와 비동기 지연을 시뮬레이션하는 구현체 |
-| **`test_mcp_home.py`** | Test Suite | 테스트 함수마다 깨끗한 `FakeHomeService`를 주입해 MCP Tool 동작을 검증하는 `pytest` 코드 |
+| **`main.py`** | Entrypoint | FastAPI 애플리케이션 수명 주기(`lifespan`) 관리, 워커 풀 시작/종료 제어, `/mcp` 엔드포인트 마운트 |
+| **`core/ports.py`** | Port | `HomeControllerPort` 추상 기본 클래스(`ABC`) 정의 |
+| **`services/worker_pool.py`** | Async Engine | `asyncio.Queue`, `asyncio.Event`, `task_db` 및 3개의 비동기 워커 코루틴 생명주기 관리 |
+| **`services/real_service.py`** | Driven Adapter | `HomeControllerPort` 구현체. 워커 풀에 작업을 위임하고 `Matter`/`IoTivity`/`Virtual` 분기 처리 |
+| **`services/fake_service.py`** | Mock Adapter | 워커 풀 없이 단일 코루틴으로 빠르게 시뮬레이션하는 단위 테스트용 구현체 |
+| **`interfaces/mcp_tools.py`** | Driving Adapter | `MCPServer` 인스턴스 및 4종의 LLM 호출용 `@mcp.tool()` 정의 |
+| **`tests/`** | Test Suite | `test_mcp_fake.py`(6개) 및 `test_real_worker.py`(3개) 자동화 검증 코드 |
